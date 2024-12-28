@@ -1,4 +1,5 @@
 import AWS from 'aws-sdk';
+import logger from '../middleware/logger.mjs';
 
 // Configure connection to DynamoDB
 AWS.config.update({
@@ -12,22 +13,37 @@ const tableName = process.env.DYNAMODB_TABLE_NAME;
 
 // Check for duplicate entry
 export const isDuplicate = async (id) => {
+    logger.info(`Checking for duplicate entry with ID: ${id}`);
     const params = {
         TableName: tableName,
         Key: { id },
     };
-    const result = await dynamoDB.get(params).promise();
-    return !!result.Item; // Returns true if the entry exists
+    try {
+        const result = await dynamoDB.get(params).promise();
+        if (result.Item) {
+            logger.warn(`Duplicate entry found with ID: ${id}`);
+        } else {
+            logger.info(`No duplicate entry found with ID: ${id}`);
+        }
+        return !!result.Item; // Returns true if the entry exists
+    } catch (error) {
+        logger.error(`Error checking duplicate for ID: ${id}. Error: ${error.message}`);
+        throw error;
+    }
 };
 
 // Save data with retry logic
 export const saveWithRetry = async (params, maxRetries = 3) => {
     for (let i = 0; i < maxRetries; i++) {
         try {
+            logger.info(`Attempt ${i + 1} to save data to DynamoDB.`);
             await dynamoDB.put(params).promise();
+            logger.info('Data successfully saved to DynamoDB.', { item: params.Item });
             return; // Successful save, exit the loop
         } catch (error) {
+            logger.error(`Attempt ${i + 1} failed. Error: ${error.message}`);
             if (i === maxRetries - 1) {
+                logger.error('All attempts to save data to DynamoDB have failed.');
                 throw error; // All attempts exhausted, throw the error
             }
         }
@@ -38,9 +54,13 @@ export const saveWithRetry = async (params, maxRetries = 3) => {
 export const saveDataToDatabase = async (data) => {
     const id = data.metadata.Board + '_' + new Date().toISOString();
 
+    logger.info(`Processing data for saving. Generated ID: ${id}`);
+
     // Check for duplicates
     if (await isDuplicate(id)) {
-        throw new Error(`Duplicate entry found with id: ${id}`);
+        const errorMessage = `Duplicate entry found with ID: ${id}`;
+        logger.error(errorMessage);
+        throw new Error(errorMessage);
     }
 
     // Parameters for saving
@@ -54,7 +74,13 @@ export const saveDataToDatabase = async (data) => {
         },
     };
 
+    logger.info(`Saving data to DynamoDB with ID: ${id}`);
     // Save data with retry logic
-    await saveWithRetry(params);
-    console.log('Data successfully saved to DynamoDB:', params.Item);
+    try {
+        await saveWithRetry(params);
+        logger.info(`Data successfully saved with ID: ${id}`);
+    } catch (error) {
+        logger.error(`Failed to save data with ID: ${id}. Error: ${error.message}`);
+        throw error;
+    }
 };
