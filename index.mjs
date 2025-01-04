@@ -1,37 +1,74 @@
-import express from 'express';
-import dotenv from 'dotenv';
-import cors from 'cors';
-import { requestLogger, errorLogger } from './middleware/logger.mjs'; // Import logger middleware
-import dataRoutes from './routes/dataRoutes.mjs';
-
-
-dotenv.config();
+import net from 'net';
+import { validateData } from './validation/validation.mjs';
+import { saveDataToDatabase } from './services/dataService.mjs';
+import logger from './middleware/logger.mjs';
+import { ValidationError, DuplicateError, DatabaseError } from './errors.mjs';
 
 const PORT = process.env.PORT || 3000;
 
-const app = express();
+// connection timeout for not active connections
+const CONNECTION_TIMEOUT = process.env.CONNECTION_TIMEOUT || 60000;
 
-// Middleware for logging requests
-app.use(requestLogger);
+const server = net.createServer((socket) => {
+	logger.info('Client connected');
 
-// Middleware
-app.use(cors());
-app.use(express.json());
+	// timeout for not active connection
+	socket.setTimeout(CONNECTION_TIMEOUT);
 
-// Routes
-app.use('/api', dataRoutes);
-// Error logging middleware
+	// handling income data
+	socket.on('data', async (data) => {
+    	try {
+        	// income data from buffer  to string and parsing jSON
+        	const parsedData = JSON.parse(data.toString());
 
-app.use(errorLogger);
+        	// data validation
+        	await validateData(parsedData);
+            logger.info ("Data validation successful")
+            
+            // saving data to DynamoDB
+        	await saveDataToDatabase(parsedData);
 
-// Global error handler
-app.use((err, req, res, next) => {
-    res.status(err.status || 500).json({
-        message: err.message || 'Internal Server Error',
-    });
+        	
+        	logger.info('Data successfully saved to DynamoDB:', {data: parsedData});
+
+    	} catch (error) {
+        	if (error instanceof ValidationError) {
+            	logger.warn('Validation error', { error: error.message });
+            	
+        	} else if (error instanceof DuplicateError) {
+            	logger.warn('Duplicate entry error', { error: error.message });
+            	
+        	} else if (error instanceof DatabaseError) {
+            	logger.error('Database error', { error: error.message });
+            	
+        	} else {
+            	logger.error('Unexpected error', { error: error.message });
+            	
+        	}
+        	socket.end(); // Close connection after error
+    	}
+	});
+
+
+	// handling  end of connection
+	socket.on('end', () => {
+    	logger.info('Client disconnected');
+	});
+
+	// handling timeout
+	socket.on('timeout', () => {
+    	logger.warn('Connection timed out');
+    	socket.end(); // Закрываем соединение
+	});
+
+	// handling errors
+	socket.on('error', (err) => {
+    	logger.error('Socket error', { error: err.message });
+	});
 });
 
-// Start server
-app.listen(PORT, () => {
-    logger.info(`Server is running on http://localhost:${PORT}`);
+// TCP server sterting
+server.listen(PORT, () => {
+	logger.info(`TCP Server is running on port ${PORT}`);
 });
+
