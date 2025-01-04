@@ -1,5 +1,5 @@
 import net from 'net';
-import logger from './middleware/logger.mjs'; // Использование обновленного логгера
+import logger from './middleware/logger.mjs'; 
 import { validateData } from './validation/validation.mjs';
 import { saveDataToDatabase } from './services/dataService.mjs';
 import { ValidationError, DuplicateError, DatabaseError } from './errors.mjs';
