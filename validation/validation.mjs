@@ -1,5 +1,5 @@
 import Joi from 'joi';
-import { ValidationError } from '../errors.mjs'; // Импорт кастомной ошибки
+import { ValidationError } from '../errors.mjs'; 
 
 
 // schema for metadata validation

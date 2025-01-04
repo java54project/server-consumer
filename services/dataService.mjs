@@ -1,17 +1,15 @@
-import AWS from 'aws-sdk';
+import { DynamoDBClient, GetItemCommand, PutItemCommand } from '@aws-sdk/client-dynamodb';
 import logger from '../middleware/logger.mjs';
-import { DuplicateError, DatabaseError } from '../errors.mjs';
 
 
 // Configure connection to DynamoDB
-AWS.config.update({
+const dynamoDB = new DynamoDBClient({
 	region: process.env.AWS_REGION,
-	accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-	secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+	credentials: {
+    	accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    	secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+	}
 });
-
-
-const dynamoDB = new AWS.DynamoDB.DocumentClient();
 const tableName = process.env.DYNAMODB_TABLE_NAME;
 
 
@@ -20,23 +18,20 @@ export const isDuplicate = async (id) => {
 	logger.info(`Checking for duplicate entry with ID: ${id}`);
 	const params = {
     	TableName: tableName,
-    	Key: { id },
+    	Key: { id: { S: id } }
 	};
 	try {
-    	const result = await dynamoDB.get(params).promise();
+    	const command = new GetItemCommand(params);
+    	const result = await dynamoDB.send(command);
     	if (result.Item) {
         	logger.warn(`Duplicate entry found with ID: ${id}`);
-        	throw new DuplicateError(`Duplicate entry found with ID: ${id}`);
     	} else {
         	logger.info(`No duplicate entry found with ID: ${id}`);
     	}
     	return !!result.Item; // Returns true if the entry exists
 	} catch (error) {
-    	if (!(error instanceof DuplicateError)) {
-        	logger.error(`Error checking duplicate for ID: ${id}. Error: ${error.message}`);
-        	throw new DatabaseError(`Database error while checking for duplicate. Error: ${error.message}`);
-    	}
-    	throw error; // rethrow the DuplicateError
+    	logger.error(`Error checking duplicate for ID: ${id}. Error: ${error.message}`);
+    	throw error;
 	}
 };
 
@@ -46,14 +41,15 @@ export const saveWithRetry = async (params, maxRetries = 3) => {
 	for (let i = 0; i < maxRetries; i++) {
     	try {
         	logger.info(`Attempt ${i + 1} to save data to DynamoDB.`);
-        	await dynamoDB.put(params).promise();
+        	const command = new PutItemCommand(params);
+        	await dynamoDB.send(command);
         	logger.info('Data successfully saved to DynamoDB.', { item: params.Item });
         	return; // Successful save, exit the loop
     	} catch (error) {
         	logger.error(`Attempt ${i + 1} failed. Error: ${error.message}`);
         	if (i === maxRetries - 1) {
             	logger.error('All attempts to save data to DynamoDB have failed.');
-            	throw new DatabaseError(`Failed to save data after ${maxRetries} attempts. Error: ${error.message}`);
+            	throw error; // All attempts exhausted, throw the error
         	}
     	}
 	}
@@ -63,20 +59,14 @@ export const saveWithRetry = async (params, maxRetries = 3) => {
 // Main function to save data to DynamoDB
 export const saveDataToDatabase = async (data) => {
 	const id = data.metadata.Board + '_' + new Date().toISOString();
-
-
 	logger.info(`Processing data for saving. Generated ID: ${id}`);
 
 
 	// Check for duplicates
-	try {
-    	await isDuplicate(id);
-	} catch (error) {
-    	if (error instanceof DuplicateError) {
-        	logger.error(error.message);
-        	throw error; // Rethrow DuplicateError
-    	}
-    	throw error; // Handle any other error
+	if (await isDuplicate(id)) {
+    	const errorMessage = `Duplicate entry found with ID: ${id}`;
+    	logger.error(errorMessage);
+    	throw new Error(errorMessage);
 	}
 
 
@@ -84,11 +74,11 @@ export const saveDataToDatabase = async (data) => {
 	const params = {
     	TableName: tableName,
     	Item: {
-        	id,
-        	metadata: data.metadata,
-        	moves: data.moves,
-        	createdAt: new Date().toISOString(),
-    	},
+        	id: { S: id },
+        	metadata: { M: data.metadata },
+        	moves: { L: data.moves },
+        	createdAt: { S: new Date().toISOString() },
+    	}
 	};
 
 
@@ -98,9 +88,8 @@ export const saveDataToDatabase = async (data) => {
     	await saveWithRetry(params);
     	logger.info(`Data successfully saved with ID: ${id}`);
 	} catch (error) {
-    	if (error instanceof DatabaseError) {
-        	logger.error(`Failed to save data with ID: ${id}. Error: ${error.message}`);
-    	}
-    	throw error; // Re-throw the error for further handling
+    	logger.error(`Failed to save data with ID: ${id}. Error: ${error.message}`);
+    	throw error;
 	}
 };
+
