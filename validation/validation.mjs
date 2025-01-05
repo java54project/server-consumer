@@ -1,27 +1,21 @@
 import Joi from 'joi';
-import { ValidationError } from '../errors.mjs'; 
+import { ValidationError } from '../errors.mjs';
 
 
-// schema for metadata validation
-const metadataSchema = Joi.object({
-	Result: Joi.string().valid('*', '1-0', '0-1', '1/2-1/2').required(),
-	FEN: Joi.string().required(),
-	Board: Joi.string().required(),
-	Site: Joi.string().required(),
-	White: Joi.string().required(),
-	Black: Joi.string().required(),
-	Annotator: Joi.string().optional(),
-});
-
-
-// Main data schema
+// Schema for the new data structure
 const dataSchema = Joi.object({
-	metadata: metadataSchema.required(),
-	moves: Joi.array().items(Joi.string().pattern(/^[a-h][1-8][a-h][1-8]$/)).required(),
+	deviceId: Joi.string().required(), // Device ID (chessclub ID)
+	board: Joi.number().integer().min(1).required(), // Board number in chessclub
+	START_FEN: Joi.string().required(), // Starting FEN position
+	moves: Joi.string().required(), // Moves as a string
+	fen: Joi.string().required(), // Current FEN position
+	lastMove: Joi.string().required(), // Last move in algebraic notation
+	greedy: Joi.boolean().required(), // Boolean flag indicating greedy behavior
+	timestamp: Joi.number().integer().min(0).required(), // Timestamp in milliseconds
 });
 
 
-// validation function
+// Validation function
 export const validateData = async (data) => {
 	const { error } = await dataSchema.validateAsync(data);
 	if (error) {

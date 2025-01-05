@@ -58,7 +58,7 @@ export const saveWithRetry = async (params, maxRetries = 3) => {
 
 // Main function to save data to DynamoDB
 export const saveDataToDatabase = async (data) => {
-	const id = data.metadata.Board + '_' + new Date().toISOString();
+	const id = data.deviceId + '_' + data.board + '_' + new Date().toISOString();
 	logger.info(`Processing data for saving. Generated ID: ${id}`);
 
 
@@ -75,8 +75,14 @@ export const saveDataToDatabase = async (data) => {
     	TableName: tableName,
     	Item: {
         	id: { S: id },
-        	metadata: { M: data.metadata },
-        	moves: { L: data.moves },
+        	deviceId: { S: data.deviceId },
+        	board: { N: data.board.toString() },
+        	START_FEN: { S: data.START_FEN },
+        	moves: { S: data.moves }, 
+        	fen: { S: data.fen },
+        	lastMove: { S: data.lastMove },
+        	greedy: { BOOL: data.greedy },
+        	timestamp: { N: data.timestamp.toString() },
         	createdAt: { S: new Date().toISOString() },
     	}
 	};
